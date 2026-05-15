@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Healthy Teeth Head Tilt Challenge</title>
+<style>
+  body { 
+    margin:0; 
+    display:flex; 
+    justify-content:center; 
+    align-items:center; 
+    height:100vh; 
+    background:#f4f8ff; 
+    font-family:"Nunito", sans-serif;
+  }
+  #screen { text-align:center; width:90%; max-width:900px; }
+  .hidden { display:none; }
+  .food-img { width:300px; height:300px; object-fit:contain; }
+  .btn { 
+    background:#4fc3f7; color:#fff; padding:15px 30px; 
+    border-radius:20px; font-size:24px; cursor:pointer; 
+    border:none; margin-top:20px;
+  }
+  #progress { height:20px; background:#ddd; border-radius:10px; margin:20px; }
+  #progress-bar { height:100%; width:0%; background:#4caf50; border-radius:10px; }
+  #feedback { font-size:40px; margin-top:20px; height:50px; }
+  .stars {
+    animation: pop 0.5s ease;
+  }
+  @keyframes pop { 
+    0% { transform:scale(0); opacity:0; } 
+    100% { transform:scale(1); opacity:1; }
+  }
+</style>
+</head>
+<body>
+
+<div id="screen">
+
+  <div id="welcome-screen">
+    <h1>Healthy Teeth Head Tilt Challenge</h1>
+    <p>Use your head to pick healthy foods!</p>
+    <button class="btn" onclick="showInstructions()">Start</button>
+  </div>
+
+  <div id="instructions-screen" class="hidden">
+    <h2>How to Play</h2>
+    <p>Tilt LEFT = Good for Teeth 👍</p>
+    <p>Tilt RIGHT = Bad for Teeth 👎</p>
+    <button class="btn" onclick="startWebcam()">Activate Webcam</button>
+  </div>
+
+  <div id="calibration-screen" class="hidden">
+    <h2>Look straight at the screen</h2>
+    <p>Calibrating...</p>
+    <video id="video" width="300" autoplay></video>
+  </div>
+
+  <div id="game-screen" class="hidden">
+    <div id="progress"><div id="progress-bar"></div></div>
+    <img id="food-img" class="food-img" />
+    <div id="feedback"></div>
+  </div>
+
+  <div id="final-screen" class="hidden">
+    <h2>Great work!</h2>
+    <p id="final-score"></p>
+    <p>Your teeth are super healthy! 🦷✨</p>
+  </div>
+
+</div>
+
+<script src="[cdn.jsdelivr.net](https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3)"></script>
+
+<script>
+let foods = [
+  { name:"Milk", good:true, img:"images/milk.png" },
+  { name:"Cheese", good:true, img:"images/cheese.png" },
+  { name:"Yogurt", good:true, img:"images/yogurt.png" },
+  { name:"Apple", good:true, img:"images/apple.png" },
+  { name:"Carrot", good:true, img:"images/carrot.png" },
+  { name:"Fish", good:true, img:"images/fish.png" },
+  { name:"Broccoli", good:true, img:"images/broccoli.png" },
+  { name:"Water", good:true, img:"images/water.png" },
+  { name:"Candy", good:false, img:"images/candy.png" },
+  { name:"Lollipop", good:false, img:"images/lollipop.png" },
+  { name:"Soda", good:false, img:"images/soda.png" },
+  { name:"Chocolate bar", good:false, img:"images/chocolate.png" },
+  { name:"Doughnut", good:false, img:"images/doughnut.png" },
+  { name:"Ice cream", good:false, img:"images/icecream.png" },
+  { name:"Gummy sweets", good:false, img:"images/gummy.png" },
+  { name:"Chips", good:false, img:"images/chips.png" }
+];
+
+foods = foods.sort(() => 0.5 - Math.random()).slice(0, 12);
+
+let index = 0;
+let score = 0;
+let faceLandmarker;
+let webcamRunning = false;
+let calibrationRoll = 0;
+
+function showInstructions(){
+  document.getElementById("welcome-screen").classList.add("hidden");
+  document.getElementById("instructions-screen").classList.remove("hidden");
+}
+
+async function startWebcam(){
+  document.getElementById("instructions-screen").classList.add("hidden");
+  document.getElementById("calibration-screen").classList.remove("hidden");
+
+  let video = document.getElementById("video");
+  const stream = await navigator.mediaDevices.getUserMedia({ video:true });
+  video.srcObject = stream;
+
+  await loadFaceModel();
+  setTimeout(calibrate, 2000);
+}
+
+async function loadFaceModel(){
+  const vision = await FilesetResolver.forVisionTasks(
+    "[cdn.jsdelivr.net](https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm)"
+  );
+
+  faceLandmarker = await FaceLandmarker.createFromOptions(
+    vision,
+    { baseOptions:{ modelAssetPath:"[cdn.jsdelivr.net](https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/face_landmarker.task)" },
+      outputFaceBlendshapes:true,
+      runningMode:"VIDEO" }
+  );
+}
+
+function calibrate(){
+  detectFrame(true);
+}
+
+function startGame(){
+  document.getElementById("calibration-screen").classList.add("hidden");
+  document.getElementById("game-screen").classList.remove("hidden");
+  nextQuestion();
+  webcamRunning = true;
+  detectFrame(false);
+}
+
+function nextQuestion(){
+  if(index >= foods.length){
+    showFinal();
+    return;
+  }
+
+  let item = foods[index];
+  document.getElementById("food-img").src = item.img;
+  document.getElementById("feedback").textContent = "";
+  updateProgress();
+}
+
+function updateProgress(){
+  let percent = (index / foods.length) * 100;
+  document.getElementById("progress-bar").style.width = percent + "%";
+}
+
+function detectFrame(isCalibrating){
+  let video = document.getElementById("video");
+
+  function frame(){
+    if(!faceLandmarker) return;
+    
+    const face = faceLandmarker.detectForVideo(video, performance.now());
+    if(face?.faceGeometry?.poseTransformationMatrix){
+      let roll = face.faceGeometry.poseTransformationMatrix.roll * (180/Math.PI);
+
+      if(isCalibrating){
+        calibrationRoll = roll;
+        startGame();
+        return;
+      }
+
+      let relative = roll - calibrationRoll;
+
+      if(relative < -12) evaluate(true);  
+      if(relative > 12) evaluate(false); 
+    }
+    requestAnimationFrame(frame);
+  }
+
+  frame();
+}
+
+function evaluate(playerThinksGood){
+  let correct = foods[index].good === playerThinksGood;
+
+  if(correct){
+    score++;
+    showFeedback("Correct! ⭐", "stars");
+  } else {
+    showFeedback("Oops!", "");
+  }
+
+  index++;
+  setTimeout(nextQuestion, 1000);
+}
+
+function showFeedback(text, effectClass){
+  let el = document.getElementById("feedback");
+  el.textContent = text;
+  el.className = effectClass;
+  setTimeout(()=> el.className="", 500);
+}
+
+function showFinal(){
+  document.getElementById("game-screen").classList.add("hidden");
+  document.getElementById("final-screen").classList.remove("hidden");
+  document.getElementById("final-score").textContent =
+    `You scored ${score} out of ${foods.length}!`;
+}
+</script>
+</body>
+</html>
